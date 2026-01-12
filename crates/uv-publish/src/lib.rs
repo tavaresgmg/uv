@@ -40,7 +40,10 @@ use uv_redacted::{DisplaySafeUrl, DisplaySafeUrlError};
 use uv_warnings::warn_user;
 
 use crate::trusted_publishing::pypi::PyPIPublishingService;
-use crate::trusted_publishing::{TrustedPublishingError, TrustedPublishingToken};
+use crate::trusted_publishing::pyx::PyxPublishingService;
+use crate::trusted_publishing::{
+    TrustedPublishingError, TrustedPublishingService, TrustedPublishingToken,
+};
 
 #[derive(Error, Debug)]
 pub enum PublishError {
@@ -402,6 +405,7 @@ pub async fn check_trusted_publishing(
     username: Option<&str>,
     password: Option<&str>,
     keyring_provider: KeyringProviderType,
+    token_store: &PyxTokenStore,
     trusted_publishing: TrustedPublishing,
     registry: &DisplaySafeUrl,
     client: &BaseClient,
@@ -417,9 +421,17 @@ pub async fn check_trusted_publishing(
             }
 
             debug!("Attempting to get a token for trusted publishing");
+
             // Attempt to get a token for trusted publishing.
-            let service = PyPIPublishingService::new(registry, client);
-            match trusted_publishing::get_token(&service).await {
+            let service = if token_store.is_known_url(registry) {
+                Box::new(PyxPublishingService::new(registry, client))
+                    as Box<dyn TrustedPublishingService>
+            } else {
+                Box::new(PyPIPublishingService::new(registry, client))
+                    as Box<dyn TrustedPublishingService>
+            };
+
+            match trusted_publishing::get_token(service.as_ref()).await {
                 // Success: we have a token for trusted publishing.
                 Ok(Some(token)) => Ok(TrustedPublishResult::Configured(token)),
                 // Failed to discover an ambient OIDC token.

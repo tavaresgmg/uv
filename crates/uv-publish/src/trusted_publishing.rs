@@ -12,6 +12,7 @@ use uv_redacted::{DisplaySafeUrl, DisplaySafeUrlError};
 use uv_static::EnvVars;
 
 pub(crate) mod pypi;
+pub(crate) mod pyx;
 
 #[derive(Debug, Error)]
 pub enum TrustedPublishingError {
@@ -35,12 +36,17 @@ pub enum TrustedPublishingError {
     #[error(transparent)]
     SerdeJson(#[from] serde_json::error::Error),
     #[error(
-        "PyPI returned error code {0}, is trusted publishing correctly configured?\nResponse: {1}\nToken claims, which must match the PyPI configuration: {2:#?}"
+        "Server returned error code {0}, is trusted publishing correctly configured?\nResponse: {1}\nToken claims, which must match the publisher configuration: {2:#?}"
     )]
-    Pypi(StatusCode, String, OidcTokenClaims),
+    TokenRejected(StatusCode, String, OidcTokenClaims),
     /// When trusted publishing is misconfigured, the error above should occur, not this one.
-    #[error("PyPI returned error code {0}, and the OIDC has an unexpected format.\nResponse: {1}")]
+    #[error(
+        "Server returned error code {0}, and the OIDC has an unexpected format.\nResponse: {1}"
+    )]
     InvalidOidcToken(StatusCode, String),
+    /// The user gave us a malformed upload URL for trusted publishing with pyx.
+    #[error("The upload URL `{0}` does not look like a valid pyx upload URL")]
+    InvalidPyxUploadUrl(DisplaySafeUrl),
 }
 
 #[derive(Deserialize)]
@@ -74,16 +80,47 @@ struct PublishToken {
 /// The payload of the OIDC token.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct OidcTokenClaims {
+#[serde(untagged)]
+pub enum OidcTokenClaims {
+    GitHub(GitHubTokenClaims),
+    GitLab(GitLabTokenClaims),
+    Buildkite(BuildkiteTokenClaims),
+}
+
+/// The relevant payload of a GitHub OIDC token.
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct GitHubTokenClaims {
     sub: String,
     repository: String,
     repository_owner: String,
     repository_owner_id: String,
     job_workflow_ref: String,
     r#ref: String,
+    environment: Option<String>,
+}
+
+/// The relevant payload of a GitLab OIDC token.
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct GitLabTokenClaims {
+    sub: String,
+    project_path: String,
+    ci_config_ref_uri: String,
+    environment: Option<String>,
+}
+
+/// The relevant payload of a Buildkite OIDC token.
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct BuildkiteTokenClaims {
+    sub: String,
+    pipeline_slug: String,
+    organization_slug: String,
 }
 
 /// A service (i.e. uploadable index) that supports trusted publishing.
+#[async_trait::async_trait]
 pub(crate) trait TrustedPublishingService {
     /// Borrow the HTTP client with middleware.
     fn client(&self) -> &ClientWithMiddleware;
@@ -105,7 +142,7 @@ pub(crate) trait TrustedPublishingService {
 /// - `Ok(None)`: Not in a supported CI environment for trusted publishing.
 /// - `Err(...)`: An error occurred while trying to obtain the token.
 pub(crate) async fn get_token(
-    service: &impl TrustedPublishingService,
+    service: &dyn TrustedPublishingService,
 ) -> Result<Option<TrustedPublishingToken>, TrustedPublishingError> {
     // Get the OIDC token's audience from the registry.
     let audience = service.audience().await?;

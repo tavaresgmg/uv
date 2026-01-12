@@ -242,12 +242,12 @@ all_targets: dict[str, TargetConfiguration] = local_targets | {
         # OIDC token in addition to the `aud:testpypi` one.
         attestations=False,
     ),
-    # TODO: Not enabled until we have a native Trusted Publishing flow for pyx in uv.
-    # "pyx-trusted-publishing": TargetConfiguration(
-    #     "astral-test-trusted-publishing",
-    #     "https://api.pyx.dev/v1/upload/astral-test/main",
-    #     "https://api.pyx.dev/simple/astral-test/main",
-    # ),
+    "pyx-trusted-publishing-github": TargetConfiguration(
+        "astral-test-trusted-publishing",
+        "https://api.pyx.dev/v1/upload/astral-test/test-uv-trusted-publishing",
+        "https://api.pyx.dev/simple/astral-test/test-uv-trusted-publishing/",
+        index=None,
+    ),
 }
 
 # Temporarily disable codeberg on CI due to unreliability.
@@ -764,6 +764,9 @@ def target_configuration(target: str) -> tuple[dict[str, str], list[str]]:
             "GITHUB_ACTIONS": "false",
             "TESTPYPI_ID_TOKEN": os.environ["UV_TEST_PUBLISH_GITLAB_OIDC_TOKEN"],
         }
+    elif target == "pyx-trusted-publishing-github":
+        extra_args = ["--trusted-publishing", "always"]
+        env = {}
     elif target == "gitlab":
         env = {"UV_PUBLISH_PASSWORD": os.environ["UV_TEST_PUBLISH_GITLAB_PAT"]}
         extra_args = ["--username", "astral-test-gitlab-pat"]
