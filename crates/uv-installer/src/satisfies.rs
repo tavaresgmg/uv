@@ -16,7 +16,7 @@ use uv_distribution_types::{
 use uv_git_types::{GitLfs, GitOid};
 use uv_normalize::PackageName;
 use uv_pep440::Version;
-use uv_platform_tags::{IncompatibleTag, TagCompatibility, Tags};
+use uv_platform_tags::{AbiTag, IncompatibleTag, TagCompatibility, Tags};
 use uv_pypi_types::{DirInfo, DirectUrl, VcsInfo, VcsKind};
 
 use crate::InstallationStrategy;
@@ -460,7 +460,25 @@ fn generate_dist_compatibility_hint(wheel_tags: &ExpandedTags, tags: &Tags) -> O
         IncompatibleTag::FreethreadedAbi => {
             let wheel_abi = wheel_tags
                 .abi_tags()
-                .map(|tag| format!("`{tag}`"))
+                .map(|tag| {
+                    // Add "with the GIL enabled" for non-free-threaded CPython ABIs
+                    let gil_suffix = matches!(
+                        tag,
+                        AbiTag::CPython {
+                            gil_disabled: false,
+                            ..
+                        }
+                    );
+                    if let Some(pretty) = tag.pretty() {
+                        if gil_suffix {
+                            format!("{pretty} (`{tag}`) with the GIL enabled")
+                        } else {
+                            format!("{pretty} (`{tag}`)")
+                        }
+                    } else {
+                        format!("`{tag}`")
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             let message = if let Some(current) = tags.abi_tag() {
@@ -473,7 +491,7 @@ fn generate_dist_compatibility_hint(wheel_tags: &ExpandedTags, tags: &Tags) -> O
                 "free-threaded Python".to_string()
             };
             Some(format!(
-                "The distribution uses the stable ABI ({wheel_abi}), but you're using {message}, which is incompatible"
+                "The distribution is compatible with {wheel_abi}, but you're using {message}"
             ))
         }
         IncompatibleTag::Abi => {
