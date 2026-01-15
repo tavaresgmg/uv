@@ -11130,6 +11130,38 @@ fn add_index_by_name_missing() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn add_index_by_name() -> Result<()> {
+    let context = TestContext::new("3.12");
+
+    let pyproject_toml = context.temp_dir.child("pyproject.toml");
+    pyproject_toml.write_str(indoc! {r#"
+        [project]
+        name = "project"
+        version = "0.1.0"
+        requires-python = ">=3.12"
+        dependencies = []
+
+        [[tool.uv.index]]
+        name = "test-index"
+        url = "https://pypi-proxy.fly.dev/simple"
+    "#})?;
+
+    uv_snapshot!(context.filters(), context.add().arg("iniconfig").arg("--index").arg("test-index"), @r"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+
+    ----- stderr -----
+    Resolved 2 packages in [TIME]
+    Prepared 1 package in [TIME]
+    Installed 1 package in [TIME]
+     + iniconfig==2.0.0
+    ");
+
+    Ok(())
+}
+
 /// Add a PyPI requirement.
 #[test]
 fn add_group_comment() -> Result<()> {
